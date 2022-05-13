@@ -1,0 +1,107 @@
+# -----------------------------------------------------------------------
+# Trivadis AG, Business Development & Support (BDS)
+# Saegereistrasse 29, 8152 Glattbrugg, Switzerland
+# -----------------------------------------------------------------------
+# Name.......: docker-compose.yml
+# Author.....: Stefan Oehrli (oes) stefan.oehrli@trivadis.com
+# Editor.....: Stefan Oehrli
+# Date.......: 2020.10.15
+# Revision...: --
+# Purpose....: Docker compose file to create Guacamole setup
+# Notes......: --
+# Reference..: https://github.com/oehrlis/oudbase
+# License....: Apache License Version 2.0, January 2004 as shown
+#              at http://www.apache.org/licenses/
+# ---------------------------------------------------------------------------
+
+version: '3.5'
+services:
+
+# - guacd -------------------------------------------------------------------
+    guacd:
+        image: guacamole/guacd
+        container_name: guacd
+        hostname: guacd
+        restart: unless-stopped
+        volumes:
+            - ${DOCKER_VOLUME_BASE}/data/guacd/drive:/drive:rw
+            - ${DOCKER_VOLUME_BASE}/data/guacd/record:/record:rw
+# - guacamole ---------------------------------------------------------------
+    guacamole:
+        image: guacamole/guacamole
+        container_name: guacamole
+        hostname: guacamole
+        restart: unless-stopped
+        depends_on:
+            - guacd
+            - mysql
+        environment:
+            GUACD_HOSTNAME: guacd
+            MYSQL_HOSTNAME: mysql
+            MYSQL_DATABASE: guacadb
+            MYSQL_USER: guacamole_user
+            MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+        links:
+            - guacd
+        # Uncomment if you want to use guacamole without nginx proxy
+        # ports:
+        # - 8080:8080/tcp
+
+# - mysql ----------------------------------------------------------------
+    mysql:
+        image: mysql/mysql-server
+        container_name: mysql
+        hostname: mysql
+        environment:
+            MYSQL_USER: guacamole_user
+            MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+            MYSQL_DATABASE: guacadb
+        restart: unless-stopped
+        volumes:
+            - ./config/mysql:/docker-entrypoint-initdb.d:ro
+            - ${DOCKER_VOLUME_BASE}/data/mysql:/var/lib/mysql/:rw
+# - nginx ----------------------------------------------------------------
+    nginx:
+        image: nginx
+        container_name: nginx
+        hostname: nginx
+        restart: unless-stopped
+        environment:
+            NGINX_HOST: ${HOSTNAME}.${NGINX_DOMAIN}
+            NGINX_PROXYSERVER: ${NGINX_PROXYSERVER}
+            GUACAMOLE_SERVER: guacamole
+        volumes:
+            - ./config/nginx/guacamole.conf.template:/etc/nginx/templates/guacamole.conf.template 
+            - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf 
+            - ./data/certbot/conf:/etc/letsencrypt
+            - ./data/certbot/www:/var/www/certbot
+        ports:
+            - 80:80
+            - 443:443
+
+# - certbot --------------------------------------------------------------
+    certbot:
+        image: certbot/certbot
+        container_name: certbot
+        hostname: certbot
+        restart: unless-stopped
+        environment:
+            WAIT2RENEW: 6h
+        volumes:
+            - ./config/certbot/renew_certbot.sh:/renew_certbot.sh 
+            - ./data/certbot/conf:/etc/letsencrypt
+            - ./data/certbot/www:/var/www/certbot
+        entrypoint: /renew_certbot.sh
+
+# - openvpn --------------------------------------------------------------
+    openvpn:
+        cap_add:
+            - NET_ADMIN
+        image: kylemanna/openvpn
+        container_name: openvpn
+        ports:
+            - "1194:1194/udp"
+        restart: always
+        volumes:
+            - ./data/openvpn-data/conf:/etc/openvpn
+# - EOF -----------------------------------------------------------------
